@@ -1,5 +1,6 @@
 from selenium import webdriver
 from customtkinter import *
+from _database_handler import AppDatabase
 from PIL import Image
 from webdriver_manager.chrome import ChromeDriverManager
 from selenium.webdriver.chrome.service import Service
@@ -16,9 +17,11 @@ options.add_experimental_option("detach", True)
 
 service = Service(ChromeDriverManager().install())
 
+db = AppDatabase("assets/data/app_database.db")
 
 @atexit.register
 def exit_handler() -> None:
+    db.close()
     print("Exiting program")
 
 def on_text_info_caller(texto: str) -> list:
@@ -108,7 +111,7 @@ def main_screen() -> None:
     message_text.pack(expand=True, side=RIGHT, fill=BOTH)
     #pack_forget()
 
-def add_contato_screen():
+def contatos_screen():
     pass
 
 def configs_tab():
@@ -118,7 +121,7 @@ def configs_tab():
     configs.minsize(width=325, height=350)
     configs.maxsize(width=325, height=350)
 
-    def configs_navigate(*frames, tab = None):
+    def configs_navigate(*frames, tab = None) -> None:
         if not tab:
             return
         
@@ -423,14 +426,14 @@ null_label.pack(
     pady=50
 )
 
-add_contato_screen_button = CTkButton(
+contatos_screen_button = CTkButton(
     master=left_bar, text="Adicionar Contatos", 
     corner_radius=64,
     border_width=2,
-    command=add_contato_screen,
+    command=contatos_screen,
     image=CTkImage(dark_image=whatsapp_icon_png, size=(12, 12), light_image=whatsapp_icon_png)
 )
-add_contato_screen_button.pack(
+contatos_screen_button.pack(
     fill=BOTH,
     padx=7,
     pady=8
