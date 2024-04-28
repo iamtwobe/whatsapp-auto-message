@@ -79,8 +79,8 @@ class AppDatabase():
         return "Missing infos"
     
     def get_all_table(self, table) -> list:
-        contacts = self.cursor.execute(f"SELECT * FROM {table}")
-        selection = contacts.fetchall()
+        table_data = self.cursor.execute(f"SELECT * FROM {table}")
+        selection = table_data.fetchall()
         return self.verify_db(selection)
     
     def verify_db(self, selection) -> dict:
@@ -109,11 +109,18 @@ class AppDatabase():
 if __name__ == "__main__":
     # Abre o banco de dados
     db = AppDatabase("test_database.db")
-    # Insere um contato
-    db.insert_contact(name="Teste", number="+55 18 23805205")
-    # Busca um contato
-    print(db.get_contact("Teste"))
-    print(db.get_all_table(table='text_models'))
+    # # Insere um contato
+    # db.insert_contact(name="Teste", number="+55 18 23805205")
+    # # Busca um contato
+    # print(db.get_contact("Teste"))
+    # print(db.get_all_table(table='text_models'))
+
+    contatos = db.get_all_table(table='contacts')
+
+    #texto = main_text_box.get('1.0', 'end-1c')
+
+
+        
 
     # Fecha
     db.close()

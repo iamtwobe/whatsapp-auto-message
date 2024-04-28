@@ -5,9 +5,8 @@ from PIL import Image
 from webdriver_manager.chrome import ChromeDriverManager
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.keys import Keys
-import sqlite3
+from selenium.webdriver.common.by import By
 import time
-import urllib
 import json
 import atexit
 
@@ -19,14 +18,33 @@ service = Service(ChromeDriverManager().install())
 
 db = AppDatabase("assets/data/app_database.db")
 
+
 @atexit.register
 def exit_handler() -> None:
     db.close()
+    open_data(
+        method='write',
+        data_type='media',
+        data=None
+    )
+    open_data(
+        method='write',
+        data_type='report',
+        data=None
+    )
     print("Exiting program")
 
 def on_text_info_caller(texto: str) -> list:
     callers = []
-    func_callers = ["(nome.contato)", "(email.contato)"]
+    if open_data(method='read', report=True):
+        func_callers = [
+            "(nome.contato)", 
+            "(email.contato)", 
+            "(func.data)"
+        ]
+
+    else:
+        func_callers = ["(nome.contato)", "(email.contato)"]
 
     for i in func_callers:
         if i in texto:
@@ -39,37 +57,72 @@ def enviar_mensagem() -> None:
 
     driver.get("https://web.whatsapp.com/")
 
-    while len(driver.find_elements_by_id("side")) < 1:
+    while len(driver.find_elements(By.ID,"side")) < 1:
         time.sleep(1)
 
-    contatos = [
-        ['numero', 'nome', 'teste@outlook.com'],
-        ['1', 'Maria', 'teste@gmail.com']
-    ]
+    contatos = db.get_all_table(table='contacts')
 
     texto = main_text_box.get('1.0', 'end-1c')
 
+    media = open_data(method='read', data_type='media')
+
     for contato in contatos:
-        numero, nome, email = contato
-        
+        contact_id, nome_contato, numero_contato, email_contato = [
+            contato['contact_id'],
+            contato['contact_name'],
+            contato['contact_number'],
+            contato['contact_email']
+        ]
+
         callers = on_text_info_caller(texto)
-        for i in callers:
-            match callers:
+        for call in callers:
+            match call:
                 case "(nome.contato)":
-                    texto = texto.replace(i, nome)
+                    texto = texto.replace(call, nome_contato)
                 case "(email.contato)":
-                    texto = texto.replace(i, email)
+                    texto = texto.replace(call, email_contato)
+                
+            # Criar leitor de planilha para receber os dados
+            # depois atualizar o caller para os tipos de dado da planilha
+                case "(func.data)":
+                    texto = texto.replace(call, 'DATA')
+        
+        driver.get("https://web.whatsapp.com/")
             
-        
-        texto = urllib.parse.quote(texto)
-        link = f"https://web.whatsapp.com/send?phone={numero}&text={texto}"
-            # Formato de número sempre em (+55) 21 9....
-        
-        driver.get(link)
-        while len(driver.find_elements_by_id("side")) < 1:
+        while len(driver.find_elements(By.XPATH, '//*[@id="side"]/div[1]/div/div[2]/div[2]/div/div[1]/p')) < 1:
             time.sleep(1)
-        driver.find_elements_by_xpath('//*[@id="main"]/footer/div[1]/div/span[2]/div/div[2]/div[1]/div/div[1]/p').send_keys(Keys.ENTER)
-        time.sleep(10)
+        campo_pesquisa = driver.find_elements(By.XPATH, '//*[@id="side"]/div[1]/div/div[2]/div[2]/div/div[1]/p')[0]
+        campo_pesquisa.click()
+        time.sleep(1)
+        campo_pesquisa.send_keys(numero_contato)
+        campo_pesquisa.send_keys(Keys.ENTER)
+            # Formato de número sempre em (+55) 21 9....
+        time.sleep(1)
+        
+        # Enviar imagem
+        if media:
+            while len(driver.find_elements(By.XPATH, '//*[@id="main"]/footer/div[1]/div/span[2]/div/div[2]/div[1]/div/div[1]/p')) < 1:
+                time.sleep(1)
+            driver.find_element(By.XPATH, '//*[@id="main"]/footer/div[1]/div/span[2]/div/div[1]/div/div/div/div/span').click()
+            attach = driver.find_element(By.XPATH, '//*[@id="main"]/footer/div[1]/div/span[2]/div/div[1]/div/div/span/div/ul/div/div[2]/li/div/input')
+            attach.send_keys(media)
+            time.sleep(1)
+            attach_text = driver.find_element(By.XPATH, '//*[@id="app"]/div/div[2]/div[2]/div[2]/span/div/span/div/div/div[2]/div/div[1]/div[3]/div/div/div[2]/div[1]/div[1]/p/br')
+            attach_text.send_keys(texto)
+            time.sleep(3)
+            send = driver.find_element(By.XPATH, '//*[@id="app"]/div/div[2]/div[2]/div[2]/span/div/span/div/div/div[2]/div/div[2]/div[2]/div/div')
+            send.click()
+
+        # Enviar apenas mensagem
+        else:
+            while len(driver.find_elements(By.XPATH, '//*[@id="main"]/footer/div[1]/div/span[2]/div/div[2]/div[1]/div/div[1]/p')) < 1:
+                time.sleep(1)
+            chat_bar = driver.find_elements(By.XPATH, '//*[@id="main"]/footer/div[1]/div/span[2]/div/div[2]/div[1]/div/div[1]/p')[0]
+            chat_bar.click()
+            time.sleep(1)
+            chat_bar.send_keys(texto)
+            chat_bar.send_keys(Keys.ENTER)
+            time.sleep(10)
 
 def character_counter(event) -> None:
     text_get = main_text_box.get('1.0', 'end-1c')
@@ -81,6 +134,47 @@ def character_counter(event) -> None:
         text=f"{text_lenght} Caracteres\n{func_lenght} Funções   "
     )
 
+def open_data(*, method:str = None, data_type:str = None, data:str= None) -> None:
+    if not method or not data_type:
+        print('Missing arguments')
+        return None
+        
+    if method == 'read':
+        if data_type == 'report':
+            try:
+                with open('assets/data/temp_report.json', 'r') as e:
+                    report_data = json.load(e)
+                    report = report_data.get('report')
+                    return report
+            except json.decoder.JSONDecodeError:
+                print('Encode error/Missing files')
+                return None
+
+        elif data_type == 'media':
+            try:
+                with open('assets/data/temp_media.json', 'r') as e:
+                    media_data = json.load(e)
+                    media = media_data.get('media')
+                    return media
+            except json.decoder.JSONDecodeError:
+                print('Encode error/Missing files')
+                return None
+
+    elif method == 'write':
+        if data_type == 'report':
+            with open('assets/data/temp_report.json', 'w') as e:
+                report = {
+                    'report': data
+                }
+                report_data = json.dump(report, e, indent=4)
+
+        elif data_type == 'media':
+            with open('assets/data/temp_media.json', 'w') as e:
+                media = {
+                    'media': data
+                }
+                media_data = json.dump(media, e, indent=4)
+        
 def change_theme(_tema, button=None) -> str:
     global tema
     tema = _tema
@@ -104,6 +198,36 @@ def language_alternator(language) -> None:
         print("BRASIL")
     elif "EN-US" in language:
         print("USA")
+
+def add_data(*, data_type:str=None) -> str:
+    try:
+        if data_type == 'media':
+            media = filedialog.askopenfilename(title='Escolha uma imagem')
+            if media:
+                open_data(
+                    method='write',
+                    data_type='media',
+                    data=media
+                )
+            else:
+                return None
+            
+        elif data_type == 'report':
+            report = filedialog.askopenfilename(title='Escolha um relatório')
+            if report:
+                open_data(
+                    method='write',
+                    data_type='report',
+                    data=report
+                )
+            else:
+                return None
+
+    except Exception as e:
+        print(e)
+
+def active_models():
+    pass
 
 # Returns to the main screen
 def main_screen() -> None:
@@ -134,6 +258,9 @@ def configs_tab():
                     pady=10
                 )
                 models_button.pack(
+                    pady=10
+                )
+                add_report_button.pack(
                     pady=10
                 )
                 language_label.pack(
@@ -205,12 +332,7 @@ def configs_tab():
         for button in buttons:
             button.pack_forget()
         
-        _lista_temp = [
-            "esse",
-            "aquele",
-            "teste",
-
-        ]
+        _lista_models = db.get_all_table(table='text_models')
 
         _row = 0
 
@@ -246,10 +368,19 @@ def configs_tab():
             side=LEFT
         )
 
-        for i in _lista_temp:
+        for i in _lista_models:
+            model_id, model_name, model_text = [
+                i['text_id'],
+                i['text_name'],
+                i['model_text'],
+            ]
+
             callable_options_test = CTkCheckBox(
                 master=scrollable_frame,
-                text=i
+                text=model_name,
+                onvalue=1,
+                offvalue=0,
+                command=lambda: print(callable_options_test.get())
             )
             callable_options_test.grid(
                 column=0,
@@ -257,13 +388,20 @@ def configs_tab():
                 padx=5,
                 sticky=NSEW
             )
+            def checkbox_lambda(button):
+                return lambda: print(button.get())
+
+            # Passando callable_options_test como parâmetro para a função lambda
+            callable_options_test.configure(command=checkbox_lambda(callable_options_test))
+
             callable_edit_button = CTkButton(
                 master=scrollable_frame,
                 text="",
                 width=25,
                 height=25,
                 fg_color="#bfa304",
-                hover_color="#bfa304"
+                hover_color="#bfa304",
+                command=None
             )
             callable_edit_button.grid(
                 pady=10,
@@ -306,10 +444,22 @@ def configs_tab():
             models_button,
             configs_theme_button,
             language_menu,
-            language_label
+            language_label,
+            add_report_button
         )
     )
     models_button.pack(
+        pady=10
+    )
+
+    add_report_button = CTkButton(
+        master=configs,
+        text='Adicionar relatório',
+        corner_radius=64,
+        border_width=2,
+        command=lambda: add_data(data_type='report')
+    )
+    add_report_button.pack(
         pady=10
     )
 
@@ -331,138 +481,125 @@ def configs_tab():
     )
     language_menu.set("Inglês [EN-US]")
 
-def teste() -> None:
-    texto = main_text_box.get("1.0", "end-1c")
-        
-    callers = on_text_info_caller(texto)
-    print(callers)
-    for i in callers:
-        match i:
-            case "(nome.contato)":
-                texto = texto.replace(i, 'NomeContato')
-            case "(email.contato)":
-                texto = texto.replace(i, 'EmailContato')
+if __name__ == "__main__":
+    app = CTk()
+    app.geometry("850x650")
+    app.title("app legal")
+    app.minsize(width=600, height=450)
+    set_appearance_mode("system")
+    set_default_color_theme("assets/configs/theme.json")
 
-    print(texto)
+    left_bar = CTkFrame(master=app, width=185, corner_radius=0)
+    left_bar.pack(side=LEFT, fill=Y)
 
+    message_text = CTkFrame(master=app, width=200, height=350)
+    message_text.pack(expand=True, side=RIGHT, fill=BOTH)
 
-app = CTk()
-app.geometry("850x650")
-app.title("app legal")
-app.minsize(width=600, height=450)
-set_appearance_mode("system")
-set_default_color_theme("assets/configs/theme.json")
+    whatsapp_icon_png = Image.open("assets/icons/whatsapp-icon.png").resize((20, 20))
 
-left_bar = CTkFrame(master=app, width=185, corner_radius=0)
-left_bar.pack(side=LEFT, fill=Y)
+    system_theme = AppearanceModeTracker.detect_appearance_mode()
 
-message_text = CTkFrame(master=app, width=200, height=350)
-message_text.pack(expand=True, side=RIGHT, fill=BOTH)
+    if system_theme == 0:
+        tema = "dark"
+        tema_shown = "Escuro"
+    elif system_theme == 1:
+        tema = "light"
+        tema_shown = "Claro"
 
-whatsapp_icon_png = Image.open("assets/icons/whatsapp-icon.png").resize((20, 20))
+    main_text_label = CTkLabel(
+        master=message_text, text="Automatizar mensagens",
+        font=("Helvetica", 24, "bold"),
+    )
+    main_text_label.pack(
+        fill=BOTH,
+        expand=True
+    )
 
-system_theme = AppearanceModeTracker.detect_appearance_mode()
+    main_text_box = CTkTextbox(
+        master=message_text,
+        width=560,
+        height=350,
+        corner_radius=16,
+        border_width=2
+    )
+    main_text_box.pack(
+        fill=BOTH,
+        expand=True
+    )
 
-if system_theme == 0:
-    tema = "dark"
-    tema_shown = "Escuro"
-elif system_theme == 1:
-    tema = "light"
-    tema_shown = "Claro"
+    add_img_button = CTkButton(
+        master=message_text, text="Adicionar imagem",
+        corner_radius=64,
+        border_width=2,
+        command=lambda:add_data(data_type='media')
+    )
+    add_img_button.pack(
+        side=BOTTOM,
+        pady=25,
+        ipady=5,
+        padx=8
+    )
 
-main_text_label = CTkLabel(
-    master=message_text, text="Automatizar mensagens",
-    font=("Helvetica", 24, "bold"),
-)
-main_text_label.pack(
-    fill=BOTH,
-    expand=True
-)
+    characters_counter_label = CTkLabel(
+        master=message_text, 
+        text=f"0 Caracteres\n0 Funções   ",
+        image=CTkImage(dark_image=whatsapp_icon_png, size=(87, 31), light_image=whatsapp_icon_png),
+        font=("Roboto", 12)
+    )
+    characters_counter_label.pack(
+        padx=15,
+        pady=1,
+        side=RIGHT
+    )
+    main_text_box.bind( '<KeyRelease>',  character_counter)
 
-main_text_box = CTkTextbox(
-    master=message_text,
-    width=560,
-    height=350,
-    corner_radius=16,
-    border_width=2
-)
-main_text_box.pack(
-    fill=BOTH,
-    expand=True
-)
+    null_label = CTkLabel(
+        master=left_bar,
+        text=""
+    )
+    null_label.pack(
+        side=TOP,
+        fill=X,
+        pady=50
+    )
 
-add_img_button = CTkButton(
-    master=message_text, text="Adicionar imagem",
-    corner_radius=64,
-    border_width=2
-)
-add_img_button.pack(
-    side=BOTTOM,
-    pady=25,
-    ipady=5,
-    padx=8
-)
+    contatos_screen_button = CTkButton(
+        master=left_bar, text="Adicionar Contatos", 
+        corner_radius=64,
+        border_width=2,
+        command=contatos_screen,
+        image=CTkImage(dark_image=whatsapp_icon_png, size=(12, 12), light_image=whatsapp_icon_png)
+    )
+    contatos_screen_button.pack(
+        fill=BOTH,
+        padx=7,
+        pady=8
+    )
 
-characters_counter_label = CTkLabel(
-    master=message_text, 
-    text=f"0 Caracteres\n0 Funções   ",
-    image=CTkImage(dark_image=whatsapp_icon_png, size=(87, 31), light_image=whatsapp_icon_png),
-    font=("Roboto", 12)
-)
-characters_counter_label.pack(
-    padx=15,
-    pady=1,
-    side=RIGHT
-)
-main_text_box.bind( '<KeyRelease>',  character_counter)
+    enviar_mensagens_screen_button = CTkButton(
+        master=left_bar, text="Enviar mensagens",
+        corner_radius=64,
+        border_width=2,
+        command=enviar_mensagem,
+    )
+    enviar_mensagens_screen_button.pack(
+        fill=BOTH,
+        padx=7,
+        pady=8
+    )
 
-null_label = CTkLabel(
-    master=left_bar,
-    text=""
-)
-null_label.pack(
-    side=TOP,
-    fill=X,
-    pady=50
-)
-
-contatos_screen_button = CTkButton(
-    master=left_bar, text="Adicionar Contatos", 
-    corner_radius=64,
-    border_width=2,
-    command=contatos_screen,
-    image=CTkImage(dark_image=whatsapp_icon_png, size=(12, 12), light_image=whatsapp_icon_png)
-)
-contatos_screen_button.pack(
-    fill=BOTH,
-    padx=7,
-    pady=8
-)
-
-enviar_mensagens_screen_button = CTkButton(
-    master=left_bar, text="Enviar mensagens",
-    corner_radius=64,
-    border_width=2,
-    command=teste,
-)
-enviar_mensagens_screen_button.pack(
-    fill=BOTH,
-    padx=7,
-    pady=8
-)
-
-config_tab_button = CTkButton(
-    master=left_bar, text="Configurações",
-    corner_radius=64,
-    border_width=2,
-    command=configs_tab
-)
-config_tab_button.pack(
-    side=BOTTOM,
-    fill=BOTH,
-    padx=7,
-    pady=8
-)
+    config_tab_button = CTkButton(
+        master=left_bar, text="Configurações",
+        corner_radius=64,
+        border_width=2,
+        command=configs_tab
+    )
+    config_tab_button.pack(
+        side=BOTTOM,
+        fill=BOTH,
+        padx=7,
+        pady=8
+    )
 
 
-app.mainloop()
+    app.mainloop()
